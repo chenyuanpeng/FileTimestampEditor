@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# PyInstaller build outputs
+build/
+dist/
+*.spec
+
+# Virtual environments
+.venv/
+venv/
+
+# OS files
+Thumbs.db
+desktop.ini
