@@ -126,12 +126,9 @@ class TimestampEditor(ttk.Frame):
         ttk.Button(toolbar, text="移除选中", command=self.remove_selected).pack(side="right")
         ttk.Button(toolbar, text="清空列表", command=self.clear).pack(side="right", padx=6)
 
-        text = "可将文件或文件夹直接拖到这里添加" if DND_AVAILABLE else "拖放功能需要安装 tkinterdnd2；可先使用“添加文件/文件夹”"
+        text = "可将文件或文件夹拖到窗口任意位置添加（含下方列表，可一次拖入多项）" if DND_AVAILABLE else "拖放功能需要安装 tkinterdnd2；可先使用“添加文件/文件夹”"
         self.drop_zone = ttk.Label(self, text=text, anchor="center", relief="groove", padding=7)
         self.drop_zone.pack(fill="x", pady=(0, 8))
-        if DND_AVAILABLE:
-            self.drop_zone.drop_target_register(DND_FILES)
-            self.drop_zone.dnd_bind("<<Drop>>", self.drop_paths)
 
         columns = ("type", "created", "accessed", "modified", "planned", "status")
         self.tree = ttk.Treeview(self, columns=columns, show="tree headings", selectmode="extended")
@@ -143,6 +140,13 @@ class TimestampEditor(ttk.Frame):
             self.tree.heading(column, text=headings[column])
             self.tree.column(column, width=widths[column], minwidth=60)
         self.tree.pack(fill="both", expand=True)
+        if DND_AVAILABLE:
+            # 整个窗口（含文件列表）均接受拖放，拖入文件或文件夹即添加
+            for target in (self.winfo_toplevel(), self.drop_zone, self.tree):
+                target.drop_target_register(DND_FILES)
+                target.dnd_bind("<<Drop>>", self.drop_paths)
+                target.dnd_bind("<<DropEnter>>", lambda *_args: self._set_drop_hint(True))
+                target.dnd_bind("<<DropLeave>>", lambda *_args: self._set_drop_hint(False))
 
         options = ttk.LabelFrame(self, text="修改选项（未勾选的时间保持原样）", padding=10)
         options.pack(fill="x", pady=10)
@@ -178,27 +182,34 @@ class TimestampEditor(ttk.Frame):
         self.add_paths(Path(value) for value in self.winfo_toplevel().tk.splitlist(event.data))
         return "break"
 
+    def _set_drop_hint(self, active: bool) -> None:
+        self.drop_zone.configure(relief="sunken" if active else "groove")
+
     def add_paths(self, paths) -> None:
-        added, failures = 0, 0
+        added, failures, folders = 0, 0, 0
         for path in paths:
             added += self.add_path(path)
-            if path.is_dir() and self.include_subfiles.get():
-                try:
-                    for child in path.rglob("*"):
-                        if child.is_file():
-                            added += self.add_path(child)
-                except OSError:
-                    failures += 1
+            if path.is_dir():
+                folders += 1
+                if self.include_subfiles.get():
+                    try:
+                        for child in path.rglob("*"):
+                            if child.is_file():
+                                added += self.add_path(child)
+                    except OSError:
+                        failures += 1
         self.update_preview()
         if failures:
             self.summary.configure(text=f"已添加 {added} 项；部分子文件无法读取。")
+        elif folders and not self.include_subfiles.get():
+            self.summary.configure(text=f"已添加 {added} 项（含 {folders} 个文件夹）；如需连子文件一起导入，请先勾选“同时导入所有层级子文件”再拖入")
 
     def add_path(self, path: Path) -> int:
         try:
             path = path.resolve()
         except OSError:
             path = path.absolute()
-        if str(path) in self.paths:
+        if path in self.paths.values():  # 按路径去重（self.paths 的键是树控件 ID）
             return 0
         try:
             times = read_file_times(path)
